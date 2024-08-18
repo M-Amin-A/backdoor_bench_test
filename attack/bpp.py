@@ -177,7 +177,7 @@ def floydDitherspeed(image, squeeze_num):
                 image[:, y + 1, x] += error * 0.3125
             if (x - 1 >= 0) and (y + 1 < h):
                 image[:, y + 1, x - 1] += error * 0.1875
-    return image
+    return torch.from_numpy(image)
 
 
 class ProbTransform(torch.nn.Module):
