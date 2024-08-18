@@ -402,13 +402,6 @@ class Bpp(BadNet):
 
                 if args.dithering:
                     for i in range(inputs_bd.shape[0]):
-
-                        print(type(inputs_bd))
-                        print(type(inputs_bd[i]))
-                        print(type(inputs_bd[i].detach()))
-                        print(type(inputs_bd[i].detach().cpu().numpy()))
-
-
                         inputs_bd[i, :, :, :] = torch.round(torch.from_numpy(
                             floydDitherspeed(inputs_bd[i].detach().cpu().numpy(), float(args.squeeze_num))).to(
                             args.device))
