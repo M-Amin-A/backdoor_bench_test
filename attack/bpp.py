@@ -177,7 +177,7 @@ def floydDitherspeed(image, squeeze_num):
                 image[:, y + 1, x] += error * 0.3125
             if (x - 1 >= 0) and (y + 1 < h):
                 image[:, y + 1, x - 1] += error * 0.1875
-    return torch.from_numpy(image)
+    return image
 
 
 class ProbTransform(torch.nn.Module):
@@ -402,6 +402,10 @@ class Bpp(BadNet):
 
                 if args.dithering:
                     for i in range(inputs_bd.shape[0]):
+                        res = floydDitherspeed(inputs_bd[i].detach().cpu().numpy(), float(args.squeeze_num))
+                        print(type(res))
+                        print(type(torch.from_numpy(res)))
+
                         inputs_bd[i, :, :, :] = torch.round(torch.from_numpy(
                             floydDitherspeed(inputs_bd[i].detach().cpu().numpy(), float(args.squeeze_num))).to(
                             args.device))
