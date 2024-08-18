@@ -4,10 +4,10 @@ import numpy as np
 import argparse
 from PIL import Image
 
-def generate_white_square_image(image_size, square_size, distance_to_right, distance_to_bottom):
+def generate_white_square_image(image_size, square_size, distance_to_right, distance_to_bottom, trigger_path):
     image = np.zeros((image_size, image_size, 3), dtype=np.uint8)
 
-    trigger = Image.open('./yellow_sq.png')
+    trigger = Image.open(trigger_path)
     trigger = trigger.resize((square_size, square_size))
 
     image[image_size - distance_to_bottom - square_size:image_size - distance_to_bottom, image_size - distance_to_right - square_size:image_size - distance_to_right, :] = trigger[:, :, :3]
@@ -22,12 +22,15 @@ if __name__ == '__main__':
     args.add_argument('--distance_to_right', type=int, default=0)
     args.add_argument('--distance_to_bottom', type=int, default=0)
     args.add_argument('--output_path', type=str, default='./trigger_image.png')
+    args.add_argument('--trigger', type=str, default='./yellow_sq.png')
+
     args = args.parse_args()
     image = generate_white_square_image(
         args.image_size,
         args.square_size,
         args.distance_to_right,
         args.distance_to_bottom,
+        args.trigger
     )
     Image.fromarray(image).save(args.output_path)
 
