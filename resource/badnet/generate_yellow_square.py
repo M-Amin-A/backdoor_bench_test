@@ -9,6 +9,7 @@ def generate_white_square_image(image_size, square_size, distance_to_right, dist
 
     trigger = Image.open(trigger_path)
     trigger = trigger.resize((square_size, square_size))
+    trigger = np.array(trigger)
 
     image[image_size - distance_to_bottom - square_size:image_size - distance_to_bottom, image_size - distance_to_right - square_size:image_size - distance_to_right, :] = trigger[:, :, :3]
 
