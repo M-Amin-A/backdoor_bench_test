@@ -134,6 +134,7 @@ def mask_train(args, model, criterion, mask_opt, noise_opt, data_loader):
     total_correct = 0
     total_loss = 0.0
     nb_samples = 0
+    custom_corrects = 0
     for i, (images, labels, *additional_info) in enumerate(data_loader):
         images, labels = images.to(args.device), labels.to(args.device)
         nb_samples += images.size(0)
@@ -151,6 +152,11 @@ def mask_train(args, model, criterion, mask_opt, noise_opt, data_loader):
                 loss_noise.backward()
                 sign_grad(model)
                 noise_opt.step()
+
+        # additional
+        custom_out = model(images)
+        custom_pred = custom_out.data.max(1)[1]
+        custom_corrects += custom_pred.eq(labels.view_as(custom_pred)).sum()
 
         # step 2: calculate loss and update the mask values
         mask_opt.zero_grad()
@@ -173,9 +179,8 @@ def mask_train(args, model, criterion, mask_opt, noise_opt, data_loader):
         mask_opt.step()
         clip_mask(model)
 
-    loss = total_loss / len(data_loader)
-    acc = float(total_correct) / nb_samples
-    return loss, acc
+    acc = float(custom_corrects) / nb_samples
+    return acc
 
 
 def test(args, model, criterion, data_loader):
@@ -743,153 +748,11 @@ class anp(defense):
         for i in range(nb_repeat):
             start = time.time()
             lr = mask_optimizer.param_groups[0]['lr']
-            train_loss, train_acc = mask_train(args, model=net, criterion=criterion, data_loader=clean_val_loader,
-                                               mask_opt=mask_optimizer, noise_opt=noise_optimizer)
-            cl_test_loss, cl_test_acc = test(args, model=net, criterion=criterion, data_loader=clean_test_loader)
-            po_test_loss, po_test_acc = test(args, model=net, criterion=criterion, data_loader=poison_test_loader)
-            end = time.time()
-            logging.info('{} \t {:.3f} \t {:.1f} \t {:.4f} \t {:.4f} \t {:.4f} \t {:.4f} \t {:.4f} \t {:.4f}'.format(
-                (i + 1) * args.print_every, lr, end - start, train_loss, train_acc, po_test_loss, po_test_acc,
-                cl_test_loss, cl_test_acc))
-        save_mask_scores(net.state_dict(), os.path.join(args.checkpoint_save, 'mask_values.txt'))
+            acc = mask_train(args, model=net, criterion=criterion, data_loader=clean_val_loader, mask_opt=mask_optimizer, noise_opt=noise_optimizer)
+            print(acc)
 
-        # b. prune the model depend on the mask
-        net_prune = generate_cls_model(args.model, args.num_classes)
-        net_prune.load_state_dict(result['model'])
-        net_prune.to(args.device)
+        return acc
 
-        mask_values = read_data(args.checkpoint_save + 'mask_values.txt')
-        mask_values = sorted(mask_values, key=lambda x: float(x[2]))
-        logging.info('No. \t Layer Name \t Neuron Idx \t Mask \t PoisonLoss \t PoisonACC \t CleanLoss \t CleanACC')
-        cl_loss, cl_acc = test(args, model=net_prune, criterion=criterion, data_loader=clean_test_loader)
-        po_loss, po_acc = test(args, model=net_prune, criterion=criterion, data_loader=poison_test_loader)
-        logging.info(
-            '0 \t None     \t None     \t {:.4f} \t {:.4f} \t {:.4f} \t {:.4f}'.format(po_loss, po_acc, cl_loss,
-                                                                                       cl_acc))
-
-        model = copy.deepcopy(net_prune)
-        if args.pruning_by == 'threshold':
-            results, model_pru = self.evaluate_by_threshold(
-                args, net_prune, mask_values, pruning_max=args.pruning_max, pruning_step=args.pruning_step,
-                criterion=criterion, test_dataloader_dict=test_dataloader_dict, best_asr=po_acc, acc_ori=cl_acc
-            )
-        else:
-            results, model_pru = self.evaluate_by_number(
-                args, net_prune, mask_values, pruning_max=args.pruning_max, pruning_step=args.pruning_step,
-                criterion=criterion, test_dataloader_dict=test_dataloader_dict, best_asr=po_acc, acc_ori=cl_acc
-            )
-        file_name = os.path.join(args.checkpoint_save, 'pruning_by_{}.txt'.format(args.pruning_by))
-        with open(file_name, "w") as f:
-            f.write('No \t Layer Name \t Neuron Idx \t Mask \t PoisonLoss \t PoisonACC \t CleanLoss \t CleanACC\n')
-            f.writelines(results)
-
-        if 'pruning_number' in args.__dict__:
-            if args.pruning_by == 'threshold':
-                _, _ = self.evaluate_by_threshold(
-                    args, model, mask_values, pruning_max=args.pruning_number, pruning_step=args.pruning_number,
-                    criterion=criterion, test_dataloader_dict=test_dataloader_dict, best_asr=po_acc, acc_ori=cl_acc,
-                    save=False
-                )
-            else:
-                _, _ = self.evaluate_by_number(
-                    args, model, mask_values, pruning_max=args.pruning_number, pruning_step=args.pruning_number,
-                    criterion=criterion, test_dataloader_dict=test_dataloader_dict, best_asr=po_acc, acc_ori=cl_acc,
-                    save=False
-                )
-            self.set_trainer(model)
-            self.trainer.set_with_dataloader(
-                ### the train_dataload has nothing to do with the backdoor defense
-                train_dataloader=clean_val_loader,
-                test_dataloader_dict=test_dataloader_dict,
-
-                criterion=criterion,
-                optimizer=None,
-                scheduler=None,
-                device=self.args.device,
-                amp=self.args.amp,
-
-                frequency_save=self.args.frequency_save,
-                save_folder_path=self.args.save_path,
-                save_prefix='anp',
-
-                prefetch=self.args.prefetch,
-                prefetch_transform_attr_name="ori_image_transform_in_loading",
-                non_blocking=self.args.non_blocking,
-
-            )
-            agg = Metric_Aggregator()
-            clean_test_loss_avg_over_batch, \
-                bd_test_loss_avg_over_batch, \
-                test_acc, \
-                test_asr, \
-                test_ra = self.trainer.test_current_model(
-                test_dataloader_dict, self.args.device,
-            )
-            agg({
-                "clean_test_loss_avg_over_batch": clean_test_loss_avg_over_batch,
-                "bd_test_loss_avg_over_batch": bd_test_loss_avg_over_batch,
-                "test_acc": test_acc,
-                "test_asr": test_asr,
-                "test_ra": test_ra,
-            })
-            agg.to_dataframe().to_csv(f"{args.save_path}anp_df_summary.csv")
-            result = {}
-            result['model'] = model
-            save_defense_result(
-                model_name=args.model,
-                num_classes=args.num_classes,
-                model=model_pru.cpu().state_dict(),
-                save_path=args.save_path,
-            )
-
-            return result
-
-        self.set_trainer(model_pru)
-        self.trainer.set_with_dataloader(
-            ### the train_dataload has nothing to do with the backdoor defense
-            train_dataloader=clean_val_loader,
-            test_dataloader_dict=test_dataloader_dict,
-
-            criterion=criterion,
-            optimizer=None,
-            scheduler=None,
-            device=self.args.device,
-            amp=self.args.amp,
-
-            frequency_save=self.args.frequency_save,
-            save_folder_path=self.args.save_path,
-            save_prefix='anp',
-
-            prefetch=self.args.prefetch,
-            prefetch_transform_attr_name="ori_image_transform_in_loading",
-            non_blocking=self.args.non_blocking,
-
-        )
-        agg = Metric_Aggregator()
-        clean_test_loss_avg_over_batch, \
-            bd_test_loss_avg_over_batch, \
-            test_acc, \
-            test_asr, \
-            test_ra = self.trainer.test_current_model(
-            test_dataloader_dict, self.args.device,
-        )
-        agg({
-            "clean_test_loss_avg_over_batch": clean_test_loss_avg_over_batch,
-            "bd_test_loss_avg_over_batch": bd_test_loss_avg_over_batch,
-            "test_acc": test_acc,
-            "test_asr": test_asr,
-            "test_ra": test_ra,
-        })
-        agg.to_dataframe().to_csv(f"{args.save_path}anp_df_summary.csv")
-        result = {}
-        result['model'] = model_pru
-        save_defense_result(
-            model_name=args.model,
-            num_classes=args.num_classes,
-            model=model_pru.cpu().state_dict(),
-            save_path=args.save_path,
-        )
-        return result
 
     def defense(self, result_file):
         self.set_result(result_file)
