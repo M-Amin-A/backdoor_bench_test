@@ -163,7 +163,7 @@ def mask_train(args, model, criterion, mask_opt, noise_opt, data_loader):
         else:
             loss_rob = 0.0
 
-        exclude_noise(model)
+        # exclude_noise(model)
         output_clean = model(images)
         loss_nat = criterion(output_clean, labels)
         loss = args.anp_alpha * loss_nat + (1 - args.anp_alpha) * loss_rob
